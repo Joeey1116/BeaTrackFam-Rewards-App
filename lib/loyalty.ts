@@ -17,12 +17,13 @@
  *                  cycle_key, status, delivery, email, email_sent_at
  *   RPC: award_points(p_user_id, p_delta, p_reason)
  *
- * Redemptions (build 19) go through the `redeem-reward` Edge Function:
- * the server mints a REAL single-use store code (Shopify Admin API, a
- * pre-created code pool, or a manual claim code), records the redemption
- * account-side via complete_redemption(), and emails the code. A
- * completed redemption is final — reinstalls and new devices read the
- * same server history; nothing can be re-minted for free.
+ * Redemptions (build 19, Cloudflare rebuild Nov 4, 2026) go through the
+ * `redeem-reward` Edge Function: the server mints a REAL single-use
+ * Cloudflare store code (D1 discount, max one use), or a manual claim
+ * code for the Free Tee, records the redemption account-side via
+ * complete_redemption(), and emails the code. A completed redemption is
+ * final — reinstalls and new devices read the same server history;
+ * nothing can be re-minted for free.
  *
  * RLS notes handled here:
  * - Clients can only read their OWN profile row and ledger rows, so

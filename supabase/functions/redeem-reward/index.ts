@@ -1,7 +1,7 @@
 /**
  * Redeem reward → mint ONE real, single-use coupon code for the caller.
  *
- * Build 19 redemption overhaul. Every redemption is a server-side,
+ * Cloudflare rebuild (Nov 4, 2026). Every redemption is a server-side,
  * account-keyed record (public.redemptions) created exactly once:
  *
  *   1. The caller is identified from their Supabase Auth JWT — never a
@@ -10,25 +10,29 @@
  *      redemption attempt. A replayed key returns the ORIGINAL redemption
  *      (same code, no second deduction) — double-taps, retries, and
  *      reinstalls can never re-mint or double-charge.
- *   3. A real code is produced by one of three routes, in order:
- *      a. LIVE (preferred): created in Shopify via the Admin API
- *         (unique price rule + discount code, usage limit 1) when
- *         SHOPIFY_SHOP_DOMAIN is set together with app credentials —
- *         either SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET (Dev
- *         Dashboard app: a short-lived Admin API token is fetched via
- *         the client-credentials grant at redemption time) or a legacy
- *         static SHOPIFY_ADMIN_ACCESS_TOKEN. If the token exchange
- *         fails, the redemption falls through to the pool route.
- *      b. POOL: a pre-created Shopify code drawn atomically from
- *         public.code_pool (see migration_redemptions_v2.sql).
- *      c. MANUAL: an internal claim code (used for the Free Tee when no
- *         product is configured — the store already emails the customer
- *         to confirm size, per the reward's description).
+ *   3. A real code is produced by one of two routes, in order:
+ *      a. CLOUDFLARE (preferred): created in the Cloudflare store's D1
+ *         discount catalog via POST /api/rewards/mint-code (single-use,
+ *         max_uses_total=1, enforced by checkout usage counting), when
+ *         REWARDS_TRIGGER_SECRET is set — the same shared secret value
+ *         the Worker uses for the order-paid points trigger. A mint
+ *         failure returns 502 with points NOT deducted; it never falls
+ *         through to a manual code the checkout cannot honor.
+ *      b. MANUAL: an internal claim code, used ONLY for the Free Tee
+ *         (no D1 equivalent for a free product — the store already
+ *         emails the customer to confirm size, per the reward's
+ *         description). The old Shopify pool route is retired:
+ *         code_pool rows are pre-created Shopify codes, worthless
+ *         after the Shopify lapse, so drawing one would hand the user
+ *         a code the checkout rejects.
  *   4. complete_redemption() records it atomically (points deducted
  *      exactly once; birthday claims guarded per BIRTHDAY_CYCLE='yearly'
  *      by CLAIM HISTORY — editing the birthday field never resets it).
- *      If recording fails after a live Shopify code was created, the
- *      price rule is deleted again (best effort) so no orphan codes live.
+ *      If recording fails after a Cloudflare code was minted, the code
+ *      is deleted again (best effort) so no orphan codes live. The
+ *      function needs no SQL change for the new route:
+ *      complete_redemption() accepts any delivery string and only
+ *      draws from code_pool when delivery = 'pool'.
  *   5. The code is emailed to the account's email via Resend when
  *      RESEND_API_KEY is set, and stamped on the redemption row. The
  *      in-app redemption history works with or without email.
@@ -38,31 +42,19 @@
  *    re-run supabase/seed.sql (adds the birthday reward + mappings).
  * 2. Deploy this function: Edge Functions → deploy `redeem-reward`
  *    (or `supabase functions deploy redeem-reward`).
- * 3. Optional but recommended — live Shopify codes:
- *    Create an app in the Shopify Dev Dashboard (dev.shopify.com) —
- *    this store no longer offers the legacy in-admin custom-app
- *    creator — with Admin API scopes: write_discounts + read_discounts
- *    (+ read_products), install it on the store, and copy the app's
- *    Client ID + Client secret. Then set Edge Function secrets:
- *      SHOPIFY_SHOP_DOMAIN=your-store.myshopify.com
- *      SHOPIFY_CLIENT_ID=<the app's Client ID>
- *      SHOPIFY_CLIENT_SECRET=<the app's Client secret>
- *    The function exchanges those credentials for a short-lived Admin
- *    API token at redemption time (client-credentials grant). A legacy
- *    static token still works instead, if one is ever available:
- *      SHOPIFY_ADMIN_ACCESS_TOKEN=<the token>
- *    Until then redemptions draw from code_pool (stock it with codes you
- *    create by hand in Shopify) or fall back to manual claim codes.
+ * 3. Cloudflare mint codes: set the Edge Function secret
+ *    REWARDS_TRIGGER_SECRET to the SAME value as the Cloudflare Worker
+ *    secret of the same name (the Worker endpoint
+ *    POST /api/rewards/mint-code checks that bearer). The store base
+ *    URL defaults to https://beatrackfam.info; override with
+ *    CLOUDFLARE_STORE_URL only if the store ever moves domains.
  * 4. Optional — code emails: create a Resend account, verify the
  *    beatrackfam.info domain, and set secrets:
  *      RESEND_API_KEY=<key>
  *      RESEND_FROM_EMAIL=BeaTrackFam Rewards <rewards@beatrackfam.info>
  *    (RESEND_FROM_EMAIL optional; the default above is used otherwise.)
- * 5. Optional — Free Tee as a true 100%-off code: set
- *    SHOPIFY_FREE_PRODUCT_ID to the tee's Shopify product id.
  */
 
-const SHOPIFY_API_VERSION = '2024-10';
 // Mirror of lib/loyalty.ts BIRTHDAY_CYCLE — policy is ENFORCED in SQL
 // (complete_redemption); this constant is documentation for this layer.
 const BIRTHDAY_CYCLE = 'yearly';
@@ -94,139 +86,53 @@ interface RewardRow {
   active: boolean;
 }
 
-/** Create a single-use discount code in Shopify. Returns the price rule id. */
-async function shopifyCreateCode(
-  shop: string,
-  token: string,
+/** Mint a single-use discount code in the Cloudflare store (D1
+ * catalog_discounts via POST /api/rewards/mint-code). Auth is the
+ * shared REWARDS_TRIGGER_SECRET bearer — the same secret value the
+ * Worker uses for the order-paid points trigger. Throws on any
+ * failure; the caller turns it into a 502 with points untouched. */
+async function cloudflareMintCode(
   reward: RewardRow,
   code: string,
-  freeProductId: string | null,
-): Promise<number> {
-  const rule: Record<string, unknown> = {
-    title: `BeaTrackFam Rewards — ${code}`,
-    customer_selection: 'all',
-    usage_limit: 1,
-    starts_at: new Date().toISOString(),
-  };
-  const value = Number(reward.discount_value ?? 0);
-  switch (reward.discount_kind) {
-    case 'percent':
-      rule.target_type = 'line_item';
-      rule.target_selection = 'all';
-      rule.allocation_method = 'across';
-      rule.value_type = 'percentage';
-      rule.value = `-${Math.abs(value)}`;
-      break;
-    case 'shipping':
-      rule.target_type = 'shipping_line';
-      rule.target_selection = 'all';
-      rule.allocation_method = 'across';
-      rule.value_type = 'percentage';
-      rule.value = '-100';
-      break;
-    case 'amount':
-      rule.target_type = 'line_item';
-      rule.target_selection = 'all';
-      rule.allocation_method = 'across';
-      rule.value_type = 'fixed_amount';
-      rule.value = `-${Math.abs(value)}`;
-      if (reward.min_subtotal != null) {
-        rule.prerequisite_subtotal_range = {
-          greater_than_or_equal_to: Number(reward.min_subtotal).toFixed(2),
-        };
-      }
-      break;
-    case 'free_product':
-      rule.target_type = 'line_item';
-      rule.target_selection = 'entitled';
-      rule.entitled_product_ids = [Number(freeProductId)];
-      rule.allocation_method = 'each';
-      rule.value_type = 'percentage';
-      rule.value = '-100';
-      break;
-    default:
-      throw new Error(`No Shopify mapping for discount_kind=${reward.discount_kind}`);
+): Promise<void> {
+  const secret = Deno.env.get('REWARDS_TRIGGER_SECRET');
+  if (!secret) {
+    throw new Error('REWARDS_TRIGGER_SECRET is not configured');
   }
-
-  const headers = {
-    'X-Shopify-Access-Token': token,
-    'Content-Type': 'application/json',
-  };
-  const ruleRes = await fetch(
-    `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/price_rules.json`,
-    { method: 'POST', headers, body: JSON.stringify({ price_rule: rule }) },
-  );
-  if (!ruleRes.ok) {
-    throw new Error(`Shopify price rule failed (${ruleRes.status})`);
+  const base = (Deno.env.get('CLOUDFLARE_STORE_URL') ?? 'https://beatrackfam.info')
+    .replace(/\/$/, '');
+  const res = await fetch(`${base}/api/rewards/mint-code`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${secret}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      code,
+      discount_kind: reward.discount_kind,
+      discount_value: reward.discount_value,
+      min_subtotal: reward.min_subtotal,
+    }),
+  });
+  if (res.status === 409) {
+    throw Object.assign(new Error('code already exists'), { code: 'CONFLICT' });
   }
-  const ruleJson = await ruleRes.json();
-  const ruleId = ruleJson?.price_rule?.id as number;
-
-  const codeRes = await fetch(
-    `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/price_rules/${ruleId}/discount_codes.json`,
-    { method: 'POST', headers, body: JSON.stringify({ discount_code: { code } }) },
-  );
-  if (!codeRes.ok) {
-    // Roll back the empty rule so failed attempts leave nothing behind.
-    await fetch(
-      `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/price_rules/${ruleId}.json`,
-      { method: 'DELETE', headers },
-    ).catch(() => {});
-    throw new Error(`Shopify discount code failed (${codeRes.status})`);
+  if (!res.ok) {
+    throw new Error(`Cloudflare mint failed (${res.status})`);
   }
-  return ruleId;
 }
 
-async function shopifyDeleteRule(shop: string, token: string, ruleId: number): Promise<void> {
-  await fetch(
-    `https://${shop}/admin/api/${SHOPIFY_API_VERSION}/price_rules/${ruleId}.json`,
-    { method: 'DELETE', headers: { 'X-Shopify-Access-Token': token } },
-  ).catch(() => {});
-}
-
-/**
- * Resolve the Admin API access token for the live Shopify route.
- * Preference order:
- *   1. Client credentials — SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET.
- *      Dev Dashboard apps issue no permanent token, so exchange the
- *      credentials for a short-lived (~24h) token at redemption time
- *      via the client-credentials grant.
- *   2. Legacy static SHOPIFY_ADMIN_ACCESS_TOKEN, used as-is.
- * Returns null when nothing is configured or the exchange fails — the
- * caller then falls through to the pool/manual routes, and no Shopify
- * code has been created yet, so nothing can be orphaned.
- */
-async function resolveShopifyToken(shop: string): Promise<string | null> {
-  const clientId = Deno.env.get('SHOPIFY_CLIENT_ID');
-  const clientSecret = Deno.env.get('SHOPIFY_CLIENT_SECRET');
-  if (clientId && clientSecret) {
-    try {
-      const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials',
-          client_id: clientId,
-          client_secret: clientSecret,
-        }).toString(),
-      });
-      if (!res.ok) {
-        console.error(`Shopify token exchange failed (${res.status})`);
-        return null;
-      }
-      const data = await res.json();
-      const token = data?.access_token as string | undefined;
-      if (!token) {
-        console.error('Shopify token exchange returned no access_token');
-        return null;
-      }
-      return token;
-    } catch (e) {
-      console.error('Shopify token exchange error:', (e as Error).message);
-      return null;
-    }
-  }
-  return Deno.env.get('SHOPIFY_ADMIN_ACCESS_TOKEN') ?? null;
+/** Best-effort rollback for a minted code whose redemption recording
+ * failed — mirrors the old Shopify price-rule delete. */
+async function cloudflareDeleteCode(code: string): Promise<void> {
+  const secret = Deno.env.get('REWARDS_TRIGGER_SECRET');
+  if (!secret) return;
+  const base = (Deno.env.get('CLOUDFLARE_STORE_URL') ?? 'https://beatrackfam.info')
+    .replace(/\/$/, '');
+  await fetch(`${base}/api/rewards/mint-code?code=${encodeURIComponent(code)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${secret}` },
+  }).catch(() => {});
 }
 
 async function sendCodeEmail(
@@ -391,48 +297,46 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Pick the delivery route. The Shopify token is resolved per request:
-  // client credentials are exchanged for a short-lived token; a failed
-  // exchange leaves shopToken null and the redemption falls through to
-  // the pool/manual routes below.
-  const shop = Deno.env.get('SHOPIFY_SHOP_DOMAIN');
-  const freeProductId = Deno.env.get('SHOPIFY_FREE_PRODUCT_ID');
-  const shopToken = shop ? await resolveShopifyToken(shop) : null;
-  const mappable = reward.discount_kind === 'percent'
+  // Pick the delivery route. Code rewards (percent / shipping / amount)
+  // mint a real single-use D1 code in the Cloudflare store; a mint
+  // failure returns 502 with points NOT deducted — never a manual code
+  // the checkout cannot honor. Free Tee has no D1 equivalent and stays
+  // a manual claim code (email to confirm size).
+  const mintable = reward.discount_kind === 'percent'
     || reward.discount_kind === 'shipping'
-    || reward.discount_kind === 'amount'
-    || (reward.discount_kind === 'free_product' && !!freeProductId);
-  const liveShopify = !!(shop && shopToken && reward.discount_kind && mappable);
+    || reward.discount_kind === 'amount';
 
-  let delivery: 'shopify' | 'pool' | 'manual' = 'manual';
+  let delivery: 'cloudflare' | 'manual' = 'manual';
   let code: string | null = null;
-  let priceRuleId: number | null = null;
 
-  if (liveShopify) {
+  if (mintable) {
     code = mintCode();
     try {
-      priceRuleId = await shopifyCreateCode(
-        shop!, shopToken!, reward as RewardRow, code, freeProductId,
-      );
-      delivery = 'shopify';
+      await cloudflareMintCode(reward as RewardRow, code);
+      delivery = 'cloudflare';
     } catch (e) {
-      console.error('Shopify code creation failed:', (e as Error).message);
-      return json(502, {
-        error: 'Could not create your code in the store — points were not deducted. Try again.',
-      });
+      if ((e as { code?: string }).code === 'CONFLICT') {
+        // Extremely unlikely random-code collision: one fresh retry.
+        code = mintCode();
+        try {
+          await cloudflareMintCode(reward as RewardRow, code);
+          delivery = 'cloudflare';
+        } catch (e2) {
+          console.error('Cloudflare code mint failed:', (e2 as Error).message);
+          return json(502, {
+            error: 'Could not create your code in the store — points were not deducted. Try again.',
+          });
+        }
+      } else {
+        console.error('Cloudflare code mint failed:', (e as Error).message);
+        return json(502, {
+          error: 'Could not create your code in the store — points were not deducted. Try again.',
+        });
+      }
     }
   } else {
-    const { count } = await admin
-      .from('code_pool')
-      .select('id', { count: 'exact', head: true })
-      .eq('reward_id', rewardId)
-      .is('redemption_id', null);
-    if ((count ?? 0) > 0) {
-      delivery = 'pool'; // code drawn atomically inside complete_redemption
-    } else {
-      delivery = 'manual';
-      code = mintCode();
-    }
+    delivery = 'manual';
+    code = mintCode();
   }
 
   // Record it — atomically, exactly once.
@@ -444,16 +348,13 @@ Deno.serve(async (req: Request) => {
     p_delivery: delivery,
   });
   if (rpcError || !row) {
-    if (priceRuleId !== null && shop && shopToken) {
-      await shopifyDeleteRule(shop, shopToken, priceRuleId);
+    if (delivery === 'cloudflare' && code) {
+      await cloudflareDeleteCode(code);
     }
     const msg = (rpcError?.message ?? '').toLowerCase();
     if (msg.includes('insufficient points')) return json(400, { error: 'insufficient points' });
     if (msg.includes('birthday')) {
       return json(409, { error: msg.includes('not set') ? 'birthday not set' : 'birthday already claimed this cycle' });
-    }
-    if (msg.includes('no codes available')) {
-      return json(503, { error: 'no codes available' });
     }
     if (msg.includes('not found')) return json(404, { error: 'reward not found or inactive' });
     console.error('complete_redemption failed:', rpcError?.message);

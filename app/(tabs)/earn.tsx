@@ -80,7 +80,7 @@ export default function Earn() {
    * Attested claim: the user confirms they actually completed the task.
    * Points are NEVER granted for merely tapping a button — only when the
    * user explicitly confirms completion. (Phase 2: API/webhook verification
-   * for purchases via Shopify webhooks, follows via platform APIs.)
+   * for purchases via the Cloudflare order-paid trigger, follows via platform APIs.)
    */
   const attestAndGrant = (
     actionId: string,
@@ -112,9 +112,9 @@ export default function Earn() {
       buttonLabel: 'SHOP',
       repeatable: true,
       run: async () => {
-        // Points are NOT granted here. They are credited by the Shopify
-        // order webhook (Supabase Edge Function) only after successful
-        // payment — see supabase/functions/shopify-order/README.
+        // Points are NOT granted here. They are credited by the Cloudflare
+        // order-paid trigger (Supabase Edge Function cloudflare-order)
+        // only after successful payment.
         try {
           const { openBrowserAsync } = await import('expo-web-browser');
           await openBrowserAsync('https://beatrackfam.info');

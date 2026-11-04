@@ -31,11 +31,22 @@ How to set up the app's database and keys. Do this once, in order.
 3d. **Deploy the redeem function**
    - In the Supabase dashboard, go to **Edge Functions** and deploy the `redeem-reward` function from `supabase/functions/redeem-reward/` (or run `supabase functions deploy redeem-reward`).
    - Also re-deploy `delete-account` — build 19's version also removes the member's stored profile photo.
-   - No secrets are required for redemptions to work (codes fall back to the code pool / manual claim codes), but two upgrades are one step each:
-     - **Live Shopify codes** (recommended): create an app in the Shopify Dev Dashboard (dev.shopify.com) — this store no longer offers the legacy in-admin custom-app creator — give it the Admin API scopes `write_discounts` + `read_discounts` (+ `read_products`), install it on the store, and copy the app's **Client ID** and **Client secret**. Then in Supabase → Edge Functions → Secrets set `SHOPIFY_SHOP_DOMAIN` to your `.myshopify.com` domain, `SHOPIFY_CLIENT_ID` to the Client ID, and `SHOPIFY_CLIENT_SECRET` to the Client secret. The function exchanges those credentials for a short-lived Admin API token at redemption time (client-credentials grant), so no permanent token is needed. (A legacy static `SHOPIFY_ADMIN_ACCESS_TOKEN` is still honored if one is ever available.) From then on every redemption creates its code live in Shopify. (The existing `SHOPIFY_WEBHOOK_SECRET` is only for order webhooks — it cannot create discounts.)
+   - No secrets are required for the Free Tee claim codes to work, but
+     two upgrades are one step each:
+     - **Live Cloudflare codes** (recommended, Nov 4, 2026 rebuild):
+       every code reward (10% Off, Free Shipping, $10 Off, Birthday 10%
+       Off) mints a real single-use D1 discount in the Cloudflare store
+       via `POST /api/rewards/mint-code`. Set the Edge Function secret
+       `REWARDS_TRIGGER_SECRET` to the SAME value as the Cloudflare
+       Worker secret of the same name. The old Shopify live-code setup
+       (`SHOPIFY_SHOP_DOMAIN` / `SHOPIFY_CLIENT_ID` /
+       `SHOPIFY_CLIENT_SECRET` / `SHOPIFY_ADMIN_ACCESS_TOKEN`) and the
+       `code_pool` stocking path are retired — pool rows are Shopify
+       codes the Cloudflare checkout cannot honor.
      - **Code emails**: create a Resend account, verify the `beatrackfam.info` domain, and set the Edge Function secret `RESEND_API_KEY`. Optionally set `RESEND_FROM_EMAIL` (default `BeaTrackFam Rewards <rewards@beatrackfam.info>`). Until then, codes still appear instantly in the app under Rewards → MY CODES.
-     - **Stocking the code pool instead**: create discount codes by hand in Shopify (one price rule per reward), then insert rows into the `code_pool` table (`reward_id`, `code`). The app hands them out one per redemption, atomically.
-     - **Free Tee as a true 100%-off code**: set the Edge Function secret `SHOPIFY_FREE_PRODUCT_ID` to the tee's Shopify product id (needs the live-Shopify secrets above). Otherwise the Free Tee uses a claim code and the store emails the member to confirm size, as its description says.
+     - **Free Tee**: always a manual claim code — the store emails the
+       member to confirm size, as its description says. There is no D1
+       equivalent for a free product.
 
 4. **Copy your keys into the app**
    - In the Supabase dashboard, go to **Project Settings → API**.
