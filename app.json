@@ -7,7 +7,7 @@
       },
       "package": "com.beatrackfaminc.rewards",
       "permissions": [],
-      "versionCode": 9,
+      "versionCode": 1000,
       "blockedPermissions": [
         "com.google.android.gms.permission.AD_ID"
       ]
@@ -19,7 +19,7 @@
     },
     "icon": "./assets/icon.png",
     "ios": {
-      "buildNumber": "20",
+      "buildNumber": "1000",
       "bundleIdentifier": "com.beatrackfaminc.rewards",
       "deploymentTarget": "16.4",
       "infoPlist": {
@@ -74,7 +74,7 @@
     "scheme": "beatrackfamrewards",
     "slug": "beatrackfam-rewards",
     "userInterfaceStyle": "dark",
-    "version": "2.0",
+    "version": "1.0.0",
     "web": {
       "bundler": "metro",
       "favicon": "./assets/favicon.png"
