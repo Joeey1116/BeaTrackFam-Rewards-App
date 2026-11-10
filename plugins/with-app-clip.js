@@ -103,7 +103,12 @@ function clipBuildSettings(config, isDebug) {
     SKIP_INSTALL: 'YES',
     SWIFT_EMBED_LIBRARIES_WITH_INSTALL: 'YES',
     SWIFT_VERSION: '5.0',
-    TARGETED_DEVICE_FAMILY: q('1'),
+    // Xcode requires the clip's UIDeviceFamily to EQUAL the parent app's
+    // (Universal 1,2 here) — iPhone-only '1' fails ValidateEmbeddedBinary
+    // at archive (run 50, Nov 10 2026). ASC's iPad rules for a universal
+    // clip are met by the clip's full icon set (incl. 152 iPad) +
+    // UISupportedInterfaceOrientations~ipad + UILaunchScreen in Info.plist.
+    TARGETED_DEVICE_FAMILY: q('1,2'),
   };
   if (isDebug) {
     settings.GCC_PREPROCESSOR_DEFINITIONS = ['"DEBUG=1"', '"$(inherited)"'];
