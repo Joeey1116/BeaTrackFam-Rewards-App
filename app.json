@@ -7,7 +7,7 @@
       },
       "package": "com.beatrackfaminc.rewards",
       "permissions": [],
-      "versionCode": 2002,
+      "versionCode": 2003,
       "blockedPermissions": [
         "com.google.android.gms.permission.AD_ID"
       ]
@@ -19,7 +19,7 @@
     },
     "icon": "./assets/icon.png",
     "ios": {
-      "buildNumber": "2002",
+      "buildNumber": "2003",
       "bundleIdentifier": "com.beatrackfaminc.rewards",
       "deploymentTarget": "16.4",
       "infoPlist": {
