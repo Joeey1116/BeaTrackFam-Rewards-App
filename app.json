@@ -69,7 +69,8 @@
           "userTrackingPermission": "This identifier is used to personalize your BeaTrackFam Rewards experience. We run no ads and no third-party trackers \u2014 it stays off unless you turn it on."
         }
       ],
-      "./plugins/with-privacy-manifest"
+      "./plugins/with-privacy-manifest",
+      "./plugins/with-app-clip"
     ],
     "scheme": "beatrackfamrewards",
     "slug": "beatrackfam-rewards",

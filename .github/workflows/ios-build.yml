@@ -10,6 +10,23 @@ name: Build iOS IPA (Rewards)
 #   2. In Apple Developer / App Store Connect, create an API key and add
 #      these four repo secrets (Settings, Secrets and variables, Actions):
 #        ASC_API_KEY_ID, ASC_API_KEY_P8, ASC_API_ISSUER_ID, APPLE_TEAM_ID
+#   3. APP CLIP (plugins/with-app-clip.js adds the target at prebuild):
+#      The App Clip App ID ALREADY EXISTS in the Developer portal —
+#      "BeaTrackFam Rewards App Clip",
+#      com.beatrackfaminc.rewards.BeaTrackFamRewards (verified from Joey's
+#      portal screenshot Nov 10). Do NOT create another App ID. NO App
+#      Clip provisioning profile exists yet (confirmed from Joey's
+#      screenshots Nov 10) — Joey will create one, App Store distribution
+#      for that App ID, including the current Apple Distribution
+#      certificate (the Nov 6 one), named exactly
+#      "BeaTrackFam Rewards App Clip". That name is what the build expects
+#      (CLIP_PROFILE in plugins/with-app-clip.js and the ExportOptions
+#      mapping below); it happens to match the App ID's name, which is
+#      fine — they are separate portal objects. The build uses
+#      -allowProvisioningUpdates, so once the profile exists the archive
+#      fetches it automatically. Until the profile exists the archive
+#      fails at the clip target's signing step — both targets must sign
+#      for the archive to succeed.
 #
 # Pattern copied from the proven workflow in the main BeaTrackFam app repo
 # (Joeey1116/BeaTrackFam-Mobile-App/.github/workflows/ios-build.yml).
@@ -144,6 +161,14 @@ jobs:
         # Step-level cap: a healthy archive finishes well under this. If the
         # signing phase ever hangs again, this fails fast instead of burning
         # the whole job timeout in macOS minutes.
+        # APP CLIP: plugins/with-app-clip.js adds the BeaTrackFamRewardsClip
+        # target at prebuild and embeds it in the main app (Embed App Clips
+        # phase), so this archive builds the clip too. Each target carries
+        # its own PROVISIONING_PROFILE_SPECIFIER in the project (Release):
+        # main app "BeaTrackFam Rewards App Store", clip
+        # "BeaTrackFam Rewards App Clip" — do NOT pass
+        # PROVISIONING_PROFILE_SPECIFIER on the command line: it would
+        # apply to every target and force the main profile onto the clip.
         timeout-minutes: 50
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
@@ -163,7 +188,6 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$DIST_SIGN_IDENTITY" \
-            PROVISIONING_PROFILE_SPECIFIER="BeaTrackFam Rewards App Store" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
       - name: Export the IPA
@@ -195,6 +219,8 @@ jobs:
             <dict>
               <key>com.beatrackfaminc.rewards</key>
               <string>BeaTrackFam Rewards App Store</string>
+              <key>com.beatrackfaminc.rewards.BeaTrackFamRewards</key>
+              <string>BeaTrackFam Rewards App Clip</string>
             </dict>
           </dict>
           </plist>
