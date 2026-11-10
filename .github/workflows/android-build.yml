@@ -31,7 +31,9 @@ on:
         default: false
 
 permissions:
-  contents: read
+  # write: the commit-back step at the end of a successful run saves
+  # the auto-bumped build number to the repo.
+  contents: write
 
 jobs:
   build:
@@ -41,6 +43,17 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Bump the build number (+1, iOS and Android in sync)
+        # App Store Connect and Google Play both reject a re-upload of a
+        # build number they already have (Rewards 2001, Nov 10, 2026).
+        # Every run gets a fresh number so a rebuild can never collide.
+        # The marketing version (e.g. 2.0.0) does NOT change here — that is
+        # a release decision. The new number is saved back to the repo by
+        # the commit-back step at the end of this run.
+        run: python3 .github/scripts/bump-build-number.py
 
       - name: Check the signing secrets are set
         env:
@@ -180,6 +193,23 @@ jobs:
           releaseFiles: ${{ steps.ver.outputs.aab_file }}
           track: production
           status: completed
+
+      - name: Save the new build number back to the repo
+        # The bumped number is now consumed by this run's artifact/upload,
+        # so the repo must record it — otherwise the next run would bump
+        # from the old number and the store would reject the re-upload as
+        # a duplicate (Rewards 2001, Nov 10, 2026). Runs only when the
+        # build/upload succeeded (default success() condition).
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add app.json
+          git diff --cached --quiet && echo "Build number unchanged — nothing to save." && exit 0
+          NEW_BUILD="$(jq -r '.expo.ios.buildNumber' app.json)"
+          git commit -m "Auto-bump build number to $NEW_BUILD [skip ci]"
+          git pull --rebase origin "${{ github.ref_name }}"
+          git push origin "${{ github.ref_name }}"
+          echo "Saved build $NEW_BUILD to ${{ github.ref_name }}."
 
       - name: Remove the keystore
         if: always()
