@@ -190,6 +190,24 @@ jobs:
             CODE_SIGN_IDENTITY="$DIST_SIGN_IDENTITY" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID"
 
+      - name: Verify the App Clip is inside the archive
+        # The clip ships embedded in the parent app bundle. If this fails,
+        # the IPA went out without the clip even though the build succeeded.
+        # (Build 2000 shipped without the clip on Nov 10, 2026 — the Embed
+        # App Clips phase never ran in that archive. Never ship silent.)
+        run: |
+          CLIP_PLIST="$GITHUB_WORKSPACE/build/BeaTrackFamRewards.xcarchive/Products/Applications/BeaTrackFamRewards.app/AppClips/BeaTrackFamRewardsClip.app/Info.plist"
+          if [ ! -f "$CLIP_PLIST" ]; then
+            echo "::error::BeaTrackFamRewardsClip.app is missing from the archive (expected under BeaTrackFamRewards.app/AppClips/). The Embed App Clips phase did not run."
+            exit 1
+          fi
+          CLIP_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$CLIP_PLIST")"
+          if [ "$CLIP_ID" != "com.beatrackfaminc.rewards.BeaTrackFamRewards" ]; then
+            echo "::error::Archived clip bundle ID is $CLIP_ID, expected com.beatrackfaminc.rewards.BeaTrackFamRewards."
+            exit 1
+          fi
+          echo "Archive contains App Clip: BeaTrackFamRewardsClip.app ($CLIP_ID)"
+
       - name: Export the IPA
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
