@@ -4,7 +4,7 @@ The official iOS and Android loyalty app for **BeaTrackFam** ([beatrackfam.info]
 
 This repository is the full source of the app and its release history. Every version ships here first: source, a version tag, and a GitHub Release with the What's New notes.
 
-**Version in development:** 1.0.0 (iOS build 1 · Android versionCode 1) · **Live in stores:** not yet — first release · **Bundle ID / package:** `com.beatrackfaminc.rewards` · **Platforms:** iOS & Android (Expo / React Native)
+**Version in development:** 2.0.0 (iOS build 2000 · Android versionCode 2000) · **Live in stores:** 1.0.0 · **Bundle ID / package:** `com.beatrackfaminc.rewards` · **Platforms:** iOS & Android (Expo / React Native)
 
 > Build numbers increment by exactly 1 on every store upload (TestFlight, App Store, or Google Play), even when the marketing version doesn't change — the stores reject reused build numbers.
 

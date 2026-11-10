@@ -29,6 +29,12 @@ God bless, and thank you for being part of this with us.
 
 loyalty rewards, points, member rewards, referral program, tiers, exclusive drops, birthday reward, streetwear rewards, small business loyalty
 
+## What's New — 2.0.0
+
+- BeaTrackFam Rewards App Clip is here — see how rewards work and check out the tiers without downloading the full app
+
+Questions or concerns? Email us at contact@beatrackfam.info
+
 ## What's New — 1.0.0
 
 - Welcome to BeaTrackFam Rewards — earn points on every order, automatically
