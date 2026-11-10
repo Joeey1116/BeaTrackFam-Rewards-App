@@ -260,27 +260,37 @@ function withAppClip(config) {
     }
 
     // --- "Embed App Clips" phase on the main app target ---
-    // dstSubfolderSpec 16 is the App Clips destination (what Xcode writes
-    // for this phase); the clip .app is copied into the main .app's
-    // AppClips/ folder during the archive.
-    if (!objects.PBXCopyFilesBuildPhase) objects.PBXCopyFilesBuildPhase = {};
-    const embedUuid = project.generateUuid();
-    objects.PBXCopyFilesBuildPhase[embedUuid] = {
-      isa: 'PBXCopyFilesBuildPhase',
-      buildActionMask: 2147483647,
-      dstPath: '""',
-      dstSubfolderSpec: 16,
-      files: [
-        {
-          value: productFile.uuid,
-          comment: `${CLIP_TARGET_NAME}.app in Embed App Clips`,
-        },
-      ],
-      name: '"Embed App Clips"',
-      runOnlyForDeploymentPostprocessing: 0,
-    };
-    objects.PBXCopyFilesBuildPhase[`${embedUuid}_comment`] = 'Embed App Clips';
-    mainTarget.buildPhases.push({ value: embedUuid, comment: 'Embed App Clips' });
+    // Built with the xcode API, not a hand-rolled phase object: the
+    // hand-rolled form generated a phase that Xcode never executed in the
+    // 2.0.0 archives (Nov 10, 2026 — clip built, never embedded, ASC said
+    // HAS APP CLIP: NO twice). The API form with an explicit
+    // $(CONTENTS_FOLDER_PATH)/AppClips destination mirrors the Motivation
+    // plugin. The file entry is pushed only if not already present.
+    project.addBuildPhase(
+      [],
+      'PBXCopyFilesBuildPhase',
+      'Embed App Clips',
+      mainTargetUuid,
+      'dynamic_library',
+      '"$(CONTENTS_FOLDER_PATH)/AppClips"'
+    );
+    const embedPhase = Object.values(
+      objects.PBXCopyFilesBuildPhase || {}
+    ).find(
+      (ph) =>
+        ph &&
+        typeof ph.name === 'string' &&
+        ph.name.includes('Embed App Clips')
+    );
+    if (
+      embedPhase &&
+      !embedPhase.files.some((f) => f.value === productFile.uuid)
+    ) {
+      embedPhase.files.push({
+        value: productFile.uuid,
+        comment: `${CLIP_TARGET_NAME}.app in Embed App Clips`,
+      });
+    }
 
     // --- Per-target signing (Release only) ---
     // The archive step must NOT pass PROVISIONING_PROFILE_SPECIFIER on the
