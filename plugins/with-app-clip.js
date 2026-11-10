@@ -103,7 +103,7 @@ function clipBuildSettings(config, isDebug) {
     SKIP_INSTALL: 'YES',
     SWIFT_EMBED_LIBRARIES_WITH_INSTALL: 'YES',
     SWIFT_VERSION: '5.0',
-    TARGETED_DEVICE_FAMILY: q('1,2'),
+    TARGETED_DEVICE_FAMILY: q('1'),
   };
   if (isDebug) {
     settings.GCC_PREPROCESSOR_DEFINITIONS = ['"DEBUG=1"', '"$(inherited)"'];
