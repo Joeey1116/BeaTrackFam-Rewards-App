@@ -207,7 +207,11 @@ jobs:
           git diff --cached --quiet && echo "Build number unchanged — nothing to save." && exit 0
           NEW_BUILD="$(jq -r '.expo.ios.buildNumber' app.json)"
           git commit -m "Auto-bump build number to $NEW_BUILD [skip ci]"
-          git pull --rebase origin "${{ github.ref_name }}"
+          # --autostash: the build leaves unstaged changes in the tree
+          # (generated files); without it the rebase refuses with
+          # "cannot pull with rebase: You have unstaged changes"
+          # (hit Nov 10, 2026: Main 1401 commit-back failed on this).
+          git pull --rebase --autostash origin "${{ github.ref_name }}"
           git push origin "${{ github.ref_name }}"
           echo "Saved build $NEW_BUILD to ${{ github.ref_name }}."
 
