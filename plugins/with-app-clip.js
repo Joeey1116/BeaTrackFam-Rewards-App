@@ -15,6 +15,10 @@
  *   the clip's sources + icons are ~40 KB and the built .app is SwiftUI
  *   + system frameworks only, so it stays far under the limit.
  *   The clip never signs anyone in and makes no network calls.
+ *   Its entitlements (clip/BeaTrackFamRewardsClip.entitlements) carry
+ *   parent-application-identifiers + on-demand-install-capable +
+ *   associated-domains applinks:beatrackfam.info (so the clip can be
+ *   invoked from https://beatrackfam.info links).
  *
  * HOW IT IS WIRED
  *   - clip/ sources are copied into ios/BeaTrackFamRewardsClip/ at prebuild
